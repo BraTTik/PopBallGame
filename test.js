@@ -1,16 +1,7 @@
-const timer = (time) => {
-    let timeout = time;
-    let timerId;
-    return function(){
-        if(timerId) clearTimeout(timerId);
-        timerId = setTimeout(()=>{
-            console.log(timeout)
-            if(timeout > 0)
-                timer(timeout - 100)();
-        }, timeout)
-    } 
-}
+const m5 = 1000 * 60 * 5;
 
-const startTimer = timer(2000);
+const ms = 300000;
 
-startTimer();
+const mins = Math.floor(ms / (60*1000));
+const secs = (ms - (mins * 60 * 1000)) / 1000;
+console.log(`${mins} : ${secs}`);

@@ -3,18 +3,42 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 const ctx = canvas.getContext('2d');
 
+let gameId;
+let score = 0;
+let flied = 0;
+let gameTimer;
+let duration;  
+let timers = [];
+let isGame = false;
+
+const scoreDisplay = document.querySelector('#score');
+const timerDisplay = document.querySelector('#timer');
+const startButton = document.querySelector('#start-button');
+const gamePanel = document.querySelector('#game-panel');
+
+
 let mouseX = undefined;
-const balls = [];
+let balls = [];
+let needle;
+let wind;
+let initBallSpeed;
+let startIntervalBetweenBalloon;
+let particles = [];
+
 const colorSet = [
     '#046975',
     '#401104',
     '#3BCC2A',
     '#FFDF59',
-    '#FF1D47'
+    '#FF1D47',
+    '#A60400',
+    '#090974',
+    '#FFE800',
+    '#A64D00',
+    '#CD0074',
+    '#7109AA',
+    '#70E500'
 ]
-
-
-
 
 const debounce = func => {
     let timer;
@@ -23,6 +47,25 @@ const debounce = func => {
         timer = setTimeout(func, 100, event);
     }
 }
+
+startButton.addEventListener('click', ()=>{
+    initGame();
+    startGame();
+})
+
+const initGame = (gameDuration = 1000 * 60 * 1, ballSpeed = 1, intervalBetweenBallon = 5000) => {
+    needle = new Needle(window.innerWidth/2, 50);
+    needle.draw();
+    wind = new Wind();
+    timers = [];
+    balls = [];
+    score = 0;
+    flied = 0;
+    duration = gameDuration;
+    initBallSpeed = ballSpeed
+    startIntervalBetweenBalloon = intervalBetweenBallon;
+}
+
 
 window.addEventListener('resize', debounce(()=>{
     canvas.width = window.innerWidth;
@@ -33,16 +76,15 @@ window.addEventListener('mousemove', (event) => {
     mouseX = event.x;
 })
 
-
-
-const Needle = function(x){
+const Needle = function(x, length){
     this.x = x;
     this.y = 0;
+    this.length = length
 
     this.draw = function(){
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineTo(this.x+5, this.y+30);
+        ctx.lineTo(this.x+5, this.y+length);
         ctx.lineTo(this.x+10, this.y);
         ctx.strokeStyle = 'black';
         ctx.fillStyle = 'black';
@@ -55,9 +97,6 @@ const Needle = function(x){
     }
 }
 
-const needle = new Needle(window.innerWidth/2);
-needle.draw();
-
 const Ball = function(x, y, dx, dy, radius){
     this.x = x;
     this.y = y;
@@ -65,31 +104,58 @@ const Ball = function(x, y, dx, dy, radius){
     this.dy = dy;
     this.radius = radius;
     this.minRadius = 10;
-    this.color = colorSet[Math.floor(Math.random() * colorSet.length)];
+    this.color = colorSet[getRandomInt(0, colorSet.length)];
     this.hitBox = [];
     this.isPopped = false;
+    this.isFliedAway = false;
     this.delta = 0;
+    this.popPosition = undefined;
 
     this.draw = function(){
-        let pimp = this.radius*2-this.radius/2; //координаты по y для пимпочки шарика
+        
+        if(!this.isPopped){
+            this.drawBalloon();
+        }else{
+            this.drawText();
+        }   
+        this.hitBox = this.setHitBox()
+    }
+
+    this.drawBalloon = function(){
         ctx.beginPath();
+        // Тело шарика
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI, true);
         ctx.strokeStyle = 'black';
-        ctx.fillStyle = this.color;
         ctx.moveTo(this.x-this.radius, this.y);
         ctx.bezierCurveTo(  this.x - this.radius+this.radius/5, 
                             this.y + this.radius*2, 
                             this.x+this.radius-this.radius/5, 
                             this.y+this.radius*2, 
                             this.x+this.radius, this.y);
+        // Пимпочка снизу
+        let pimp = this.radius*2-this.radius/2; //координаты по y для пимпочки шарика
         ctx.moveTo(this.x, this.y+pimp);
         ctx.lineTo(this.x-5, this.y+pimp+5);
         ctx.lineTo(this.x+10, this.y+pimp+5);
-        ctx.lineTo(this.x, this.y+pimp);
+        ctx.closePath();
+        
+        //Градиент для объёмной формы
+        let xGrd = this.x+this.radius/3;
+        let yGrd = this.y-this.radius/3;
+        let grd = ctx.createRadialGradient(xGrd, yGrd, this.radius/20, xGrd-this.radius/3, yGrd-this.radius/3, this.radius*1.5);
+        grd.addColorStop(0, 'white');
+        grd.addColorStop(1, this.color);
+        ctx.fillStyle = grd;
+
         ctx.stroke();
         ctx.fill();
+    }
 
-        this.hitBox = this.setHitBox()
+    this.drawText = function(){
+        ctx.font = '40px "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = this.color;
+        ctx.fillText('+1', this.x, this.y); 
     }
 
     this.setHitBox = function(){
@@ -108,8 +174,10 @@ const Ball = function(x, y, dx, dy, radius){
         }
         return hitBox;
     }
+
     this.setIsPopped = function(){
         this.isPopped = true;
+        this.popPosition = this.y - 15;
     }
 
     this.setDelta = function(){
@@ -119,7 +187,6 @@ const Ball = function(x, y, dx, dy, radius){
         if(this.dx < 0){
             this.delta = Math.abs((window.innerWidth - this.x)/window.innerWidth - 1)
         }
-
     }
     
 
@@ -127,49 +194,14 @@ const Ball = function(x, y, dx, dy, radius){
         this.setDelta();
         if(!this.isPopped){
             this.y -= this.dy;
-            
             this.x += this.dx*this.delta;
         }else{
-            this.dy += .1;
-            this.y += this.dy;
-            (this.radius > this.minRadius)&&(this.radius -= .5 );
+            this.dy = .5;
+            this.y -= this.dy;
         }
         this.draw();
     }
 }
-
-
-const launchBall = (time, speed) => {
-    let timeout = time;
-    const ballMaxRadius = 55;
-    const ballMinRadius = 30;
-    let velocity = speed;
-    let timer;
-    return function () {
-        if(timer) clearTimeout(timer);
-        timer = setTimeout(()=>{
-            const radius = getRandomInt(ballMinRadius, ballMaxRadius);
-            const x = getRandomInt(3+radius, window.innerWidth-radius+3);
-            const y = window.innerHeight + radius*2;
-    
-            const ball = new Ball(x, y, 0, velocity, radius);
-            ball.draw();
-            ball.setHitBox();
-            balls.push(ball);
-            
-            if (velocity < 5){
-                velocity += .1;
-            }
-            if(timeout > 200){
-                timeout -= 100;
-            }
-            timer = setTimeout(launchBall(timeout, velocity), timeout)
-        }, timeout)
-
-    }
-}
-
-
 
 const Wind = function(){
     this.isBlowing = false;
@@ -180,46 +212,221 @@ const Wind = function(){
     }
 }
 
-const wind = new Wind();
+const Particle = function(){
+    this.x = getRandomInt(-window.innerWidth/2, window.innerWidth + window.innerWidth/2);
+    this.y = 0
+    this.dx = 0;
+    this.dy = Math.random();
+    this.size = getRandomInt(1, 3);
+    this.origindy = this.dy;
+
+    this.draw = function(){
+        ctx.beginPath()
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+    }
+
+    this.update = function(){
+        this.y += this.dy;
+        this.x += (Math.pow(this.dx, 3) / (this.dy*2));
+        this.draw();
+    }
+}
+
+const launchBall = () => {
+    const ballMaxRadius = 55;
+    const ballMinRadius = 30;
+    return function (velocity) {
+        const radius = getRandomInt(ballMinRadius, ballMaxRadius);
+        const x = getRandomInt(3+radius, window.innerWidth-radius+3);
+        const y = window.innerHeight + radius*2;
+        const ball = new Ball(x, y, 0, velocity, radius);
+        ball.draw();
+        balls.push(ball);
+    }
+}
 
 const game = () => {
-    requestAnimationFrame(game);
+    gameId = requestAnimationFrame(game);
     ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
     needle.update();
     needle.draw();
+
+    // цикл для шаров
     balls.forEach((ball, index, ballArray) => {
         wind.isBlowing ? ball.dx = wind.strength : ball.dx = 0;
         ball.update();
+
+        // находим возможный хитбокс для иглы
         let hitBox = ball.hitBox.find(box => {
-            return box[0] < 30 && box[0] > 25;
+            return box[0] < needle.length && box[0] > needle.length - needle.length/2;
         })
 
-       if(hitBox && (needle.x + 3) <= hitBox[1] && (needle.x + 3) >= hitBox[2]){
+        // опрделение попала игла в хитбокс или нет
+       if(isGame && hitBox && (needle.x + 3) <= hitBox[1] && (needle.x + 3) >= hitBox[2]){
+           !ball.isPopped && (score += 1);
+           scoreDisplay.innerText = 'Score: ' + score;
            ball.setIsPopped();
        }
 
-
-       if(ball.isPopped && ball.y > window.innerWidth || ball.y < -100){
-           delete ballArray[index];
+       // подсчёт улетевших шаров
+       if(isGame && !ball.isFliedAway && !ball.isPopped && ball.y < 0){
+           flied += 1;
+           ball.isFliedAway = true;
        }
+
+       // очистка отработанных шаров
+       if(ball.y < -100 || (ball.isPopped && (ball.y < ball.popPosition) )){
+           delete ballArray[index]
+       }
+    })
+
+    // цикл для частичек
+    particles.forEach( (particle, index, array) => {
+        particle.update();
+        wind.isBlowing ? particle.dx = wind.strength/3 : particle.dx = 0;
+        if(particle.y > window.innerHeight){
+            delete array[index];
+            array.push(new Particle());
+        }
     })
 }
 
+const displayTimer = (ms) => {
+    const mins = Math.floor(ms / (60*1000));
+    const secs = addZero((ms - (mins * 60 * 1000)) / 1000);
+    timerDisplay.innerText = `${mins} : ${secs}`;
+}
 
+const startGame = () => {
+
+    gameId && cancelAnimationFrame(gameId);
+    isGame = true;
+    panelOff();
+    setTimeout(()=>{
+        showTutorial();
+    }, 1000);
+
+    let balloonInterval = startIntervalBetweenBalloon;
+    let balloonSpeed = initBallSpeed;
+
+    gameTimer = setInterval(()=>{
+        displayTimer(duration);
+        duration -= 1000;
+        if(duration < 0){
+            clearTimeout(gameTimer);
+            gameOver();
+        }
+    }, 1000);
+
+    let windTimer = setInterval(()=>{
+        wind.isBlowing = !wind.isBlowing
+        wind.isBlowing && wind.startBlow();
+    }, 2000);
+
+    timers = [windTimer, gameTimer];
+
+    let particlesCount = 0;
+    particles.length > 300 ? particlesCount = 0 : particlesCount = 300 - particles.length;
+    for(let i = 0; i < particlesCount; i++){
+        particles.push(new Particle());
+    }
+
+    const ballLauncher = launchBall();
+    ballLauncher(initBallSpeed);
+
+    let ballTimer = setTimeout(function ball(){
+        if(ballTimer) clearTimeout(ballTimer)
+        ballLauncher(balloonSpeed);
+        if(balloonInterval > 400){
+            balloonInterval -= 500;
+        }else if(duration < 10000 && balloonInterval > 50){
+            balloonInterval -= 50;
+        }else if(balloonInterval < 400){ 
+            balloonInterval = 400;
+        }
+
+        ballTimer = setTimeout(ball, balloonInterval);
+        timers = [...timers, ballTimer]
+    }, balloonInterval)
+
+    let velocityTimer = setInterval(()=>{
+        if(balloonSpeed < 5){
+            balloonSpeed += .1;
+        }
+    }, 1000)
+    
+    timers = [...timers, velocityTimer];
+
+    game();
+}
+
+const gameOver = () => {
+    panelOn();
+    isGame = false;
+    stopTimers(timers);
+}
+
+
+
+const panelOff = () => {
+    let button = gamePanel.querySelector('#start-button');
+    scoreDisplay.innerHTML = "Score: 0";
+    button.style.visibility = 'hidden';
+    gamePanel.style.top = '-100%';
+}
+
+const panelOn = () => {
+    let button = gamePanel.querySelector('#start-button');
+    gamePanel.innerHTML = '';
+
+    const gameOver = document.createElement('h1');
+    gameOver.innerHTML = '<h1>Game Over</h1>'
+
+    const scores = document.createElement('h2');
+    scores.innerText = `Your scores: ${score}`;
+
+    const fliedAway = document.createElement('h2');
+    fliedAway.innerText = `Balloon away: ${flied}`;
+
+    gamePanel.appendChild(scores);
+    gamePanel.appendChild(fliedAway);
+    gamePanel.appendChild(gameOver);
+    gamePanel.appendChild(button);
+
+    gamePanel.style.top = '50%';
+    button.style.visibility = 'visible';    
+}
+
+const showTutorial = () =>{
+    let divEl = document.createElement('div');
+    divEl.classList.add('tutorial');
+    divEl.innerHTML = 'Move mouse to move the Needle left and right';
+    console.log(divEl)
+    document.body.appendChild(divEl);
+    setTimeout(()=>{
+        document.body.removeChild(divEl);
+    }, 3000)
+}
+
+
+
+// Служебные функции
+const addZero = (num) => {
+    if(num < 10){
+        num  = '0' + num;
+    }
+    return num;
+}
+
+const stopTimers = (timers) => {
+    timers.forEach( timer => {
+        clearTimeout(timer);
+    })
+}
 
 const getRandomInt = (min, max) => {
     return Math.floor(Math.random()*(max-min)+min);
 }
 
-
-const startGame = () => {
-    let timer = setInterval(()=>{
-        wind.isBlowing = !wind.isBlowing
-        wind.isBlowing&&wind.startBlow();
-    }, 2000);
-    launchBall(2000, 2)();
-    game();
-}
-
-
-startGame();
