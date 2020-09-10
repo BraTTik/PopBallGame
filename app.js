@@ -3,27 +3,26 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 const ctx = canvas.getContext('2d');
 
+const scoreDisplay = document.querySelector('#score');
+const timerDisplay = document.querySelector('#timer');
+const startButton = document.querySelector('#start-button');
+const gamePanel = document.querySelector('#game-panel');
+
 let gameId;
 let score = 0;
 let flied = 0;
 let gameTimer;
 let duration;  
 let timers = [];
+let balls = [];
+let particles = [];
 let isGame = false;
 
-const scoreDisplay = document.querySelector('#score');
-const timerDisplay = document.querySelector('#timer');
-const startButton = document.querySelector('#start-button');
-const gamePanel = document.querySelector('#game-panel');
-
-
 let mouseX = undefined;
-let balls = [];
 let needle;
 let wind;
 let initBallSpeed;
 let startIntervalBetweenBalloon;
-let particles = [];
 
 const colorSet = [
     '#046975',
@@ -39,14 +38,6 @@ const colorSet = [
     '#7109AA',
     '#70E500'
 ]
-
-const debounce = func => {
-    let timer;
-    return event => {
-        if(timer) clearTimeout(timer);
-        timer = setTimeout(func, 100, event);
-    }
-}
 
 startButton.addEventListener('click', ()=>{
     initGame();
@@ -66,6 +57,18 @@ const initGame = (gameDuration = 1000 * 60 * 1, ballSpeed = 1, intervalBetweenBa
     startIntervalBetweenBalloon = intervalBetweenBallon;
 }
 
+const startGame = () => {
+    gameId && cancelAnimationFrame(gameId);
+    isGame = true;
+    panelOff();
+
+    setGameTimer();
+    setWind();
+    setParticles();
+    setBalloonLauncher();
+
+    game();
+}
 
 window.addEventListener('resize', debounce(()=>{
     canvas.width = window.innerWidth;
@@ -110,6 +113,7 @@ const Ball = function(x, y, dx, dy, radius){
     this.isFliedAway = false;
     this.delta = 0;
     this.popPosition = undefined;
+    this.inertion = 0;
 
     this.draw = function(){
         
@@ -152,7 +156,7 @@ const Ball = function(x, y, dx, dy, radius){
     }
 
     this.drawText = function(){
-        ctx.font = '40px "Press Start 2P"';
+        ctx.font = '30px "Press Start 2P"';
         ctx.textAlign = 'center';
         ctx.fillStyle = this.color;
         ctx.fillText('+1', this.x, this.y); 
@@ -180,12 +184,24 @@ const Ball = function(x, y, dx, dy, radius){
         this.popPosition = this.y - 15;
     }
 
-    this.setDelta = function(){
+    this.setDelta = function(){ // функция для расчёта силы действия ветра на шар
         if(this.dx > 0){
             this.delta = (window.innerWidth - this.x)/window.innerWidth
         }
         if(this.dx < 0){
             this.delta = Math.abs((window.innerWidth - this.x)/window.innerWidth - 1)
+        }
+    }
+
+    this.setInertion = function(){ // добавление небольшой инерции шару
+        this.inertion = this.dx*this.delta;
+    }
+
+    this.slowDownInertion = function(){
+        if(this.inertion > 0.01){
+            this.inertion -= 0.01;
+        }else if(this.inertion < -0.01){
+            this.inertion += 0.01;
         }
     }
     
@@ -194,7 +210,13 @@ const Ball = function(x, y, dx, dy, radius){
         this.setDelta();
         if(!this.isPopped){
             this.y -= this.dy;
-            this.x += this.dx*this.delta;
+            if(this.dx != 0){
+                this.x += this.dx*this.delta;
+                this.setInertion()
+            }else{
+                this.x += this.inertion;
+                this.slowDownInertion();
+            }
         }else{
             this.dy = .5;
             this.y -= this.dy;
@@ -214,11 +236,23 @@ const Wind = function(){
 
 const Particle = function(){
     this.x = getRandomInt(-window.innerWidth/2, window.innerWidth + window.innerWidth/2);
-    this.y = 0
+    this.y = 0;
     this.dx = 0;
     this.dy = Math.random();
     this.size = getRandomInt(1, 3);
     this.origindy = this.dy;
+    this.inertion = 0;
+
+    this.setInertion = function(){
+        this.inertion = (this.dx/(3*this.dy))/2;
+    }
+    this.slowDownInertion = function(){
+        if(this.inertion > 0.005){
+            this.inertion -= 0.005;
+        }else if(this.inertion < -0.005){
+            this.inertion += 0.005;
+        }
+    }
 
     this.draw = function(){
         ctx.beginPath()
@@ -228,8 +262,16 @@ const Particle = function(){
     }
 
     this.update = function(){
+        if(this.dx != 0){
+            this.setInertion();
+            this.x += (this.dx/(3*this.dy));
+        }else{
+            this.x += this.inertion;
+            this.slowDownInertion();
+        }
         this.y += this.dy;
-        this.x += (Math.pow(this.dx, 3) / (this.dy*2));
+        
+
         this.draw();
     }
 }
@@ -260,7 +302,7 @@ const game = () => {
 
         // находим возможный хитбокс для иглы
         let hitBox = ball.hitBox.find(box => {
-            return box[0] < needle.length && box[0] > needle.length - needle.length/2;
+            return box[0] < needle.length && box[0] > 0;
         })
 
         // опрделение попала игла в хитбокс или нет
@@ -299,18 +341,13 @@ const displayTimer = (ms) => {
     timerDisplay.innerText = `${mins} : ${secs}`;
 }
 
-const startGame = () => {
+const gameOver = () => {
+    panelOn();
+    isGame = false;
+    stopTimers(timers);
+}
 
-    gameId && cancelAnimationFrame(gameId);
-    isGame = true;
-    panelOff();
-    setTimeout(()=>{
-        showTutorial();
-    }, 1000);
-
-    let balloonInterval = startIntervalBetweenBalloon;
-    let balloonSpeed = initBallSpeed;
-
+const setGameTimer = () => {
     gameTimer = setInterval(()=>{
         displayTimer(duration);
         duration -= 1000;
@@ -320,19 +357,29 @@ const startGame = () => {
         }
     }, 1000);
 
+    timers = [...timers, gameTimer];
+}
+
+const setWind = () => {
     let windTimer = setInterval(()=>{
         wind.isBlowing = !wind.isBlowing
         wind.isBlowing && wind.startBlow();
     }, 2000);
 
-    timers = [windTimer, gameTimer];
+    timers = [...timers, windTimer];
+}
 
+const setParticles = () => {
     let particlesCount = 0;
     particles.length > 300 ? particlesCount = 0 : particlesCount = 300 - particles.length;
     for(let i = 0; i < particlesCount; i++){
         particles.push(new Particle());
     }
+}
 
+const setBalloonLauncher = () => {
+    let balloonInterval = startIntervalBetweenBalloon;
+    let balloonSpeed = initBallSpeed;
     const ballLauncher = launchBall();
     ballLauncher(initBallSpeed);
 
@@ -349,7 +396,7 @@ const startGame = () => {
 
         ballTimer = setTimeout(ball, balloonInterval);
         timers = [...timers, ballTimer]
-    }, balloonInterval)
+    }, balloonInterval);
 
     let velocityTimer = setInterval(()=>{
         if(balloonSpeed < 5){
@@ -358,26 +405,20 @@ const startGame = () => {
     }, 1000)
     
     timers = [...timers, velocityTimer];
-
-    game();
 }
 
-const gameOver = () => {
-    panelOn();
-    isGame = false;
-    stopTimers(timers);
-}
-
-
-
-const panelOff = () => {
+const panelOff = () => { // убрать панель
     let button = gamePanel.querySelector('#start-button');
     scoreDisplay.innerHTML = "Score: 0";
     button.style.visibility = 'hidden';
     gamePanel.style.top = '-100%';
+
+    setTimeout(()=>{
+        showTutorial();
+    }, 1000);
 }
 
-const panelOn = () => {
+const panelOn = () => { // показать панель
     let button = gamePanel.querySelector('#start-button');
     gamePanel.innerHTML = '';
 
@@ -403,7 +444,6 @@ const showTutorial = () =>{
     let divEl = document.createElement('div');
     divEl.classList.add('tutorial');
     divEl.innerHTML = 'Move mouse to move the Needle left and right';
-    console.log(divEl)
     document.body.appendChild(divEl);
     setTimeout(()=>{
         document.body.removeChild(divEl);
@@ -430,3 +470,10 @@ const getRandomInt = (min, max) => {
     return Math.floor(Math.random()*(max-min)+min);
 }
 
+const debounce = (func) => {
+    let timer;
+    return event => {
+        if(timer) clearTimeout(timer);
+        timer = setTimeout(func, 100, event);
+    }
+}
